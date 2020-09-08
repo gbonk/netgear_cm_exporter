@@ -13,6 +13,7 @@ type Modem struct {
 	Address  string `yaml:"address"`
 	Username string `yaml:"username"`
 	Password string `yaml:"password"`
+	Model    string `yaml:"model"`
 }
 
 // Telemetry represents the exporter's listen address and metrics URI path.
@@ -40,6 +41,7 @@ func NewConfigFromFile(path string) (*Config, error) {
 		Modem: Modem{
 			Address:  "192.168.100.1",
 			Username: "admin",
+			Model:    "CM600",
 		},
 		Telemetry: Telemetry{
 			ListenAddress: ":9527",

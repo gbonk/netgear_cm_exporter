@@ -7,11 +7,8 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 
-	"github.com/PuerkitoBio/goquery"
-	"github.com/gocolly/colly"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -26,8 +23,8 @@ var (
 	buildDate string
 )
 
-// Exporter represents an instance of the Netgear cable modem exporter.
-type Exporter struct {
+// Status Exporter represents an instance of the Netgear cable modem exporter.
+type StatusExporter struct {
 	url, authHeaderValue string
 
 	mu sync.Mutex
@@ -54,15 +51,21 @@ func basicAuth(username, password string) string {
 	return base64.StdEncoding.EncodeToString([]byte(auth))
 }
 
-// NewExporter returns an instance of Exporter configured with the modem's
+type CMExporter interface {
+	Collect(ch chan<- prometheus.Metric)
+
+	Describe(ch chan<- *prometheus.Desc)
+}
+
+// Returns an instance of StatusExporter configured with the modem's
 // address, admin username and password.
-func NewExporter(addr, username, password string) *Exporter {
+func NewStatusExporter(addr, username, password string) StatusExporter {
 	var (
 		dsLabelNames = []string{"channel", "lock_status", "modulation", "channel_id", "frequency"}
 		usLabelNames = []string{"channel", "lock_status", "channel_type", "channel_id", "frequency"}
 	)
 
-	return &Exporter{
+	return StatusExporter{
 		// Modem access details.
 		url:             "http://" + addr + "/DocsisStatus.asp",
 		authHeaderValue: "Basic " + basicAuth(username, password),
@@ -115,145 +118,18 @@ func NewExporter(addr, username, password string) *Exporter {
 	}
 }
 
-// Describe returns Prometheus metric descriptions for the exporter metrics.
-func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
-	// Exporter metrics.
-	ch <- e.totalScrapes.Desc()
-	ch <- e.scrapeErrors.Desc()
-	// Downstream metrics.
-	ch <- e.dsChannelSNR
-	ch <- e.dsChannelPower
-	ch <- e.dsChannelCorrectableErrs
-	ch <- e.dsChannelUncorrectableErrs
-	// Upstream metrics.
-	ch <- e.usChannelPower
-	ch <- e.usChannelSymbolRate
-}
+func NewStatusExporterFactory(addr, username, password string, modemType string) CMExporter {
 
-// Collect runs our scrape loop returning each Prometheus metric.
-func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
-	e.totalScrapes.Inc()
+	switch modemType {
+	case "CM600":
+		return &CM600StatusExporter{StatusExporter: NewStatusExporter(addr, username, password)}
+	case "CM1000":
+		return &CM1000StatusExporter{StatusExporter: NewStatusExporter(addr, username, password)}
+	default:
+		log.Println("The modem type" + modemType + " is not known. Defaulting to CM600")
+		return &CM600StatusExporter{StatusExporter: NewStatusExporter(addr, username, password)}
+	}
 
-	c := colly.NewCollector()
-
-	// OnRequest callback adds basic auth header.
-	c.OnRequest(func(r *colly.Request) {
-		r.Headers.Add("Authorization", e.authHeaderValue)
-	})
-
-	// OnError callback counts any errors that occur during scraping.
-	c.OnError(func(r *colly.Response, err error) {
-		log.Printf("scrape failed: %d %s", r.StatusCode, http.StatusText(r.StatusCode))
-		e.scrapeErrors.Inc()
-	})
-
-	// Callback to parse the tbody block of table with id=dsTable, the downstream table info.
-	c.OnHTML(`#dsTable tbody`, func(elem *colly.HTMLElement) {
-		elem.DOM.Find("tr").Each(func(i int, row *goquery.Selection) {
-			if i == 0 {
-				return // no rows were returned
-			}
-			var (
-				channel    string
-				lockStatus string
-				modulation string
-				channelID  string
-				freqMHz    string
-				snr        float64
-				power      float64
-				corrErrs   float64
-				unCorrErrs float64
-			)
-			row.Find("td").Each(func(j int, col *goquery.Selection) {
-				text := strings.TrimSpace(col.Text())
-
-				switch j {
-				case 0:
-					channel = text
-				case 1:
-					lockStatus = text
-				case 2:
-					modulation = text
-				case 3:
-					channelID = text
-				case 4:
-					{
-						var freqHZ float64
-						fmt.Sscanf(text, "%f Hz", &freqHZ)
-						freqMHz = fmt.Sprintf("%0.2f MHz", freqHZ/1e6)
-					}
-				case 5:
-					fmt.Sscanf(text, "%f dBmV", &power)
-				case 6:
-					fmt.Sscanf(text, "%f dB", &snr)
-				case 7:
-					fmt.Sscanf(text, "%f", &corrErrs)
-				case 8:
-					fmt.Sscanf(text, "%f", &unCorrErrs)
-				}
-			})
-			labels := []string{channel, lockStatus, modulation, channelID, freqMHz}
-
-			ch <- prometheus.MustNewConstMetric(e.dsChannelSNR, prometheus.GaugeValue, snr, labels...)
-			ch <- prometheus.MustNewConstMetric(e.dsChannelPower, prometheus.GaugeValue, power, labels...)
-			ch <- prometheus.MustNewConstMetric(e.dsChannelCorrectableErrs, prometheus.CounterValue, corrErrs, labels...)
-			ch <- prometheus.MustNewConstMetric(e.dsChannelUncorrectableErrs, prometheus.CounterValue, unCorrErrs, labels...)
-		})
-	})
-
-	// Callback to parse the tbody block of table with id=usTable, the upstream channel info.
-	c.OnHTML(`#usTable tbody`, func(elem *colly.HTMLElement) {
-		elem.DOM.Find("tr").Each(func(i int, row *goquery.Selection) {
-			if i == 0 {
-				return // no rows were returned
-			}
-			var (
-				channel     string
-				lockStatus  string
-				channelType string
-				channelID   string
-				symbolRate  float64
-				freqMHz     string
-				power       float64
-			)
-			row.Find("td").Each(func(j int, col *goquery.Selection) {
-				text := strings.TrimSpace(col.Text())
-				switch j {
-				case 0:
-					channel = text
-				case 1:
-					lockStatus = text
-				case 2:
-					channelType = text
-				case 3:
-					channelID = text
-				case 4:
-					{
-						fmt.Sscanf(text, "%f Ksym/sec", &symbolRate)
-						symbolRate = symbolRate * 1000 // convert to sym/sec
-					}
-				case 5:
-					{
-						var freqHZ float64
-						fmt.Sscanf(text, "%f Hz", &freqHZ)
-						freqMHz = fmt.Sprintf("%0.2f MHz", freqHZ/1e6)
-					}
-				case 6:
-					fmt.Sscanf(text, "%f dBmV", &power)
-				}
-			})
-			labels := []string{channel, lockStatus, channelType, channelID, freqMHz}
-
-			ch <- prometheus.MustNewConstMetric(e.usChannelPower, prometheus.GaugeValue, power, labels...)
-			ch <- prometheus.MustNewConstMetric(e.usChannelSymbolRate, prometheus.GaugeValue, symbolRate, labels...)
-		})
-	})
-
-	e.mu.Lock()
-	c.Visit(e.url)
-	e.totalScrapes.Collect(ch)
-	e.scrapeErrors.Collect(ch)
-	e.mu.Unlock()
 }
 
 func main() {
@@ -274,7 +150,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	exporter := NewExporter(config.Modem.Address, config.Modem.Username, config.Modem.Password)
+	//		exporter := NewEventExporterFactory( config.Modem.Address, config.Modem.Username, config.Modem.Password )
+
+	exporter := NewStatusExporterFactory(config.Modem.Address, config.Modem.Username, config.Modem.Password, config.Modem.Model)
 
 	prometheus.MustRegister(exporter)
 
