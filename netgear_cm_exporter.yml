@@ -1,7 +1,7 @@
 modem:
   address: 192.168.100.1
   username: admin
-  password: yourpassword
+  password: password
 
 telemetry:
   listen_address: 127.0.0.1:9527
