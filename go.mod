@@ -1,4 +1,4 @@
-module github.com/ickymettle/netgear_cm_exporter
+module github.com/gbonk/netgear_cm_exporter
 
 require (
 	github.com/PuerkitoBio/goquery v1.5.0
