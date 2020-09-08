@@ -140,7 +140,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Printf("netgear_cm_exporter version=%s revision=%s branch=%s buildUser=%s buildDate=%s\n",
+		fmt.Printf("gbonk/netgear_cm_exporter version=%s revision=%s branch=%s buildUser=%s buildDate=%s\n",
 			version, revision, branch, buildUser, buildDate)
 		os.Exit(0)
 	}
@@ -150,7 +150,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	//		exporter := NewEventExporterFactory( config.Modem.Address, config.Modem.Username, config.Modem.Password )
+//	exporter := NewEventExporterFactory( config.Modem.Address, config.Modem.Username, config.Modem.Password )
 
 	exporter := NewStatusExporterFactory(config.Modem.Address, config.Modem.Username, config.Modem.Password, config.Modem.Model)
 

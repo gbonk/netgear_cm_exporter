@@ -28,7 +28,7 @@ type EventExporter struct {
 
 // NewExporter returns an instance of Exporter configured with the modem's
 // address, admin username and password.
-func NewEventExporter(addr, username, password string) *EventExporter {
+func NewEventExporterFactory(addr, username, password string) *EventExporter {
 	var (
 		dsLabelNames = []string{"time", "priority", "description"}
 	)
@@ -152,6 +152,9 @@ func (e *EventExporter) Collect(ch chan<- prometheus.Metric) {
 		panic(err)
 	}
 	fmt.Printf("%+v", eventTable)
+
+
+
 
 	e.mu.Lock()
 	e.totalEventScrapes.Collect(ch)
