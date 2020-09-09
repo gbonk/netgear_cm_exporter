@@ -150,9 +150,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-//	exporter := NewEventExporterFactory( config.Modem.Address, config.Modem.Username, config.Modem.Password )
+	exporter := NewEventExporterFactory( config.Modem.Address, config.Modem.Username, config.Modem.Password )
 
-	exporter := NewStatusExporterFactory(config.Modem.Address, config.Modem.Username, config.Modem.Password, config.Modem.Model)
+//	exporter := NewStatusExporterFactory(config.Modem.Address, config.Modem.Username, config.Modem.Password, config.Modem.Model)
 
 	prometheus.MustRegister(exporter)
 

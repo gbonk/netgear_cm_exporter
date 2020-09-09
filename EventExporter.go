@@ -2,11 +2,11 @@ package main
 
 import (
 	"encoding/xml"
-	"fmt"
 	"github.com/prometheus/client_golang/prometheus"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +24,8 @@ type EventExporter struct {
 	eventTime        *prometheus.Desc
 	eventPriority    *prometheus.Desc
 	eventDescription *prometheus.Desc
+
+	eventTimeStamp time.Time
 }
 
 // NewExporter returns an instance of Exporter configured with the modem's
@@ -110,11 +112,13 @@ type EventRow struct {
 type EventTable struct {
 	XMLName xml.Name `xml:"docsDevEventTable"`
 
-	EventRows []EventRow `xml:"tr"`
+	EventRow []EventRow `xml:"tr"`
 }
 
 // Collect runs our scrape loop returning each Prometheus metric.
 func (e *EventExporter) Collect(ch chan<- prometheus.Metric) {
+
+	path := "tmp/cm-event.log"
 
 	e.totalEventScrapes.Inc()
 
@@ -151,13 +155,52 @@ func (e *EventExporter) Collect(ch chan<- prometheus.Metric) {
 	if err := xml.Unmarshal([]byte(xmlData), &eventTable); err != nil {
 		panic(err)
 	}
-	fmt.Printf("%+v", eventTable)
+//	fmt.Printf("%+v", eventTable)
 
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Println("Error opening event log destination file : ")
+		log.Println(err)
+	}
+	defer file.Close()
 
+	tne := "Time Not Established"
 
+	for i := 0; i < len(eventTable.EventRow); i++ {
+
+		row := eventTable.EventRow[i]
+
+		evt := row.EventFirstTime
+		var  eventLogTime  time.Time
+
+		if evt != tne {
+			// Get the Timestamp from the line
+			eventLogTimeFormat := "2006-01-02, 15:04:05"
+			eventLogTime, err = time.Parse(eventLogTimeFormat, evt)
+			if (err != nil) {
+				log.Println("Error while formatting Event Log Date : ")
+				log.Println(err)
+			}
+		} else {
+			eventLogTime = e.eventTimeStamp
+		}
+
+		if e.eventTimeStamp.After( eventLogTime ) {
+			continue // Skip ones we have already written
+		} else
+		{
+			formattedEventLog := "[" + row.EventFirstTime + "] " + row.EventLevel + " - " + row.EventText + "\n"
+			file.WriteString(formattedEventLog)
+			e.eventTimeStamp = eventLogTime
+		}
+
+	}
+
+	file.Sync()
 
 	e.mu.Lock()
 	e.totalEventScrapes.Collect(ch)
 	e.scrapeEventErrors.Collect(ch)
 	e.mu.Unlock()
 }
+
